@@ -1,5 +1,5 @@
-# geostat
-QGIS Processing Toolbox tool for Variogram Modeling and Ordinary Kriging using GSTools
+# QGIS Processing Toolbox tool for Variogram Modeling and Ordinary Kriging using GSTools
+This tool automates variogram modeling and kriging within QGIS, providing a user-friendly interface for spatial interpolation.
 ---
 ## Usage:
 
