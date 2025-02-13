@@ -38,19 +38,11 @@ This tool automates variogram modeling and kriging within QGIS, providing a user
 
 ## Final Checklist for Future Use:
 1. Input Validation:
-
--- Ensure your point layer has ≥4 points with meaningful variation
-
--- Confirm the polygon covers part of the grid
-
+ - Ensure your point layer has ≥4 points with meaningful variation
+ - Confirm the polygon covers part of the grid
 2. Performance Tips:
-
--- Start with coarse cell sizes (e.g., 100m) for large areas
-
--- Use spherical/exponential models for better convergence
-
+ - Start with coarse cell sizes (e.g., 100m) for large areas
+ - Use spherical/exponential models for better convergence
 3. Troubleshooting:
-
--- Check QGIS Log for model parameters
-
--- Verify output raster statistics in Properties > Information
+ - Check QGIS Log for model parameters
+ - Verify output raster statistics in Properties > Information
