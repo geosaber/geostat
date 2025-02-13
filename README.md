@@ -46,3 +46,7 @@ This tool automates variogram modeling and kriging within QGIS, providing a user
 3. Troubleshooting:
  - Check QGIS Log for model parameters
  - Verify output raster statistics in Properties > Information
+
+# Python Geostatistical Tools
+[GSTools](https://geostat-framework.readthedocs.io/projects/gstools/en/stable/contents.html)
+[SciKit GStat](https://scikit-gstat.readthedocs.io/en/latest/index.html)
