@@ -1,0 +1,22 @@
+[general]
+name=GeoStats - Geostatistical Analysis
+qgisMinimumVersion=3.40
+qgisMaximumVersion=4.99
+description=Geostatistical plugin for variogram modeling, kriging interpolation (OK, UK, EDK, IK), cross-validation and audit-trail reporting. Designed for Qualified Persons (QP) under CRIRSCO-aligned codes.
+version=1.0.0
+author=Sidney Schaberle Goveia
+email=geosaber@gmail.com
+about=Professional geostatistical toolkit for mineral resource estimation. Features interactive variogram modeling with auto-fit, multiple kriging methods (Ordinary, Universal, External Drift, Indicator), polygon-masked raster output, leave-one-out cross-validation, and comprehensive PDF reports for auditing under JORC/NI 43-101/CBRR standards.
+
+tracker=https://github.com/geosaber/geostat/issues
+repository=https://github.com/geosaber/geostat
+
+tags=geostatistics,kriging,variogram,interpolation,mining,resource estimation
+
+homepage=https://github.com/geosaber/geostat
+category=Analysis
+icon=icons/icon.png
+experimental=False
+deprecated=False
+server=False
+hasProcessingProvider=yes

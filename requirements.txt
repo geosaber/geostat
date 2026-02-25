@@ -1,0 +1,6 @@
+numpy>=1.24
+scipy>=1.10
+pandas>=2.0
+matplotlib>=3.7
+scikit-gstat>=1.0
+pykrige>=1.7
