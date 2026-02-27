@@ -15,7 +15,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Converter Markdown para HTML
-        uses: mathiasvr/markdown-to-pages-action@v1
+        uses: geosaber/geostat@v1
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           # O arquivo README.md será convertido em index.html
