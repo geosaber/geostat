@@ -3,11 +3,11 @@
 Professional geostatistical toolkit for mineral resource estimation in QGIS.
 Variogram modeling · Kriging interpolation · Cross-validation · Audit-trail reporting
 
-![QGIS Version](https://img.shields.io/badge/QGIS-3.28_→_4.x-93b023?logo=qgis&logoColor=white)
+![QGIS Version](https://img.shields.io/badge/QGIS-3.44_→_4.x-93b023?logo=qgis&logoColor=white)
 ![Python 3.12](https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white)
 ![GPLv3 License](https://img.shields.io/badge/License-GPLv3-blue)
 ![PyQt6](https://img.shields.io/badge/Qt-6_(PyQt6)-41CD52?logo=qt&logoColor=white)
-
+[![DOI](https://zenodo.org/badge/932386461.svg)](https://doi.org/10.5281/zenodo.18803706)
 ---
 
 ## 📋 Table of Contents
