@@ -23,6 +23,7 @@ Variogram modeling · Kriging interpolation · Cross-validation · Audit-trail r
 - [Building the Plugin](#building-the-plugin)
 - [Compliance & Standards](#compliance--standards)
 - [License & Disclaimer](#license--disclaimer)
+- [Citation](#citation)
 
 ---
 
@@ -317,6 +318,10 @@ This project is licensed under the **GNU General Public License v3.0** — see [
 > The authors assume **NO liability** for resource estimates, investment decisions, or regulatory submissions derived from outputs of this software.
 
 ---
+
+## Citation
+
+> Sidney Schaberle Goveia, “Geostatistical Analysis for QGIS Processing Toolbox”. Zenodo, fev. 27, 2026. doi: 10.5281/zenodo.18803707
 
 ---
 
