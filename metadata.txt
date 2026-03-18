@@ -1,0 +1,9 @@
+[general]
+name=GeoStats
+qgisMinimumVersion=3.44
+qgisMaximumVersion=4.99
+description=Advanced Geostatistical Analysis for Mineral Resource Estimation.
+version=0.2
+author=Sidney Schaberle Goveia
+pythonVersion=3.12.12
+external_dependencies=numpy,pandas,scikit-gstat,pykrige,matplotlib,scipy
