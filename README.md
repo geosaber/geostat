@@ -7,7 +7,7 @@ Variogram modeling · Kriging interpolation · Cross-validation · Audit-trail r
 ![Python 3.12](https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white)
 ![GPLv3 License](https://img.shields.io/badge/License-GPLv3-blue)
 ![PyQt6](https://img.shields.io/badge/Qt-6_(PyQt6)-41CD52?logo=qt&logoColor=white)
-[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.18803707.svg)](https://doi.org/10.5281/zenodo.18803707)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.18803707.svg)](https://doi.org/10.5281/zenodo.18803706)
 
 ---
 
@@ -320,4 +320,4 @@ This project is licensed under the **GNU General Public License v3.0** — see [
 
 ## Citation
 
-> Sidney Schaberle Goveia, “Geostatistical Analysis for QGIS Processing Toolbox”. Zenodo, fev. 27, 2026. doi: 10.5281/zenodo.18803707
+> Sidney Schaberle Goveia, “Geostatistical Analysis for QGIS Processing Toolbox”. Zenodo, fev. 27, 2026. doi: 10.5281/zenodo.18803706
