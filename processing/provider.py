@@ -1,38 +1,31 @@
-# -*- coding: utf-8 -*-
-"""
-GeoStats Processing Provider
-==============================
-Registers all geostatistical algorithms into the QGIS Processing Toolbox.
-"""
-
 import os
-
 from qgis.core import QgsProcessingProvider
+from qgis.PyQt.QtGui import QIcon
 
-from .variogram_algorithm import VariogramAlgorithm
-from .kriging_algorithm import KrigingAlgorithm
+from .kriging_algorithm import UnifiedKrigingAlgorithm
+from .variography_algorithm import InteractiveVariographyAlgorithm
+from .variogram_map_algorithm import VariogramMapAlgorithm
+from .validation_algorithm import ValidationReportAlgorithm
 
+class GeostatProvider(QgsProcessingProvider):
+    def __init__(self):
+        super().__init__()
 
-class GeoStatProvider(QgsProcessingProvider):
-    """Processing provider that groups all geostatistical algorithms."""
-
-    def id(self) -> str:
-        return "geostats"
-
-    def name(self) -> str:
-        return "Geostatistics"
-
-    def longName(self) -> str:
-        return "Geostatistics — Variogram & Kriging Toolbox"
-
-    def icon(self):
-        icon_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "icons", "icon.png")
-        from qgis.PyQt.QtGui import QIcon
-        if os.path.exists(icon_path):
-            return QIcon(icon_path)
-        return super().icon()
+    def unload(self):
+        pass
 
     def loadAlgorithms(self):
-        """Load all algorithms into the provider."""
-        self.addAlgorithm(VariogramAlgorithm())
-        self.addAlgorithm(KrigingAlgorithm())
+        self.addAlgorithm(InteractiveVariographyAlgorithm())
+        self.addAlgorithm(VariogramMapAlgorithm())
+        self.addAlgorithm(UnifiedKrigingAlgorithm())
+        self.addAlgorithm(ValidationReportAlgorithm())
+
+    def id(self):
+        return 'geostat_exploration'
+
+    def name(self):
+        return 'Geostatistics Analysis'
+
+    def icon(self):
+        icon_path = os.path.join(os.path.dirname(__file__), '..', 'icons', 'icon.png')
+        return QIcon(icon_path)

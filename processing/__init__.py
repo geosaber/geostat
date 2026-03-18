@@ -1,1 +1,1 @@
-# -*- coding: utf-8 -*-
+# Initialize processing module

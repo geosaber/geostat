@@ -1,574 +1,328 @@
-# -*- coding: utf-8 -*-
-"""
-Kriging Processing Algorithm
-===============================
-QgsProcessingAlgorithm for kriging interpolation.
-Loads a fitted variogram model from JSON, performs kriging on a regular grid,
-applies a boundary mask, and outputs GeoTIFF rasters.
-"""
-
-from __future__ import annotations
-
-import os
-import tempfile
-
-from qgis.core import (
-    QgsProcessing,
-    QgsProcessingAlgorithm,
-    QgsProcessingParameterVectorLayer,
-    QgsProcessingParameterField,
-    QgsProcessingParameterFile,
-    QgsProcessingParameterEnum,
-    QgsProcessingParameterNumber,
-    QgsProcessingParameterRasterDestination,
-    QgsProcessingParameterBoolean,
-    QgsProcessingParameterRasterLayer,
-    QgsProcessingParameterFileDestination,
-    QgsProcessingContext,
-    QgsProcessingFeedback,
-    QgsMessageLog,
-    Qgis,
-)
-
+from qgis.PyQt.QtCore import QCoreApplication
+from qgis.core import (QgsProcessing,
+                       QgsProcessingAlgorithm,
+                       QgsProcessingParameterFeatureSource,
+                       QgsProcessingParameterField,
+                       QgsProcessingParameterRasterDestination,
+                       QgsProcessingParameterNumber,
+                       QgsProcessingParameterEnum,
+                       QgsProcessingParameterFile,
+                       QgsMessageLog, Qgis, QgsRasterLayer, QgsCoordinateReferenceSystem, QgsProviderRegistry)
+from pykrige.ok import OrdinaryKriging
+from osgeo import gdal, osr
 import numpy as np
+import os
+import sys
 
-from ..core.variography import VariogramModel
-from ..core.kriging_engine import run_kriging
-from ..core.grid_manager import (
-    generate_grid,
-    compute_convex_hull,
-    create_boundary_mask,
-    apply_mask,
-    create_output_raster,
-    boundary_from_layer_wkt,
-)
-from ..core.data_validation import validate_input_data
+class UnifiedKrigingAlgorithm(QgsProcessingAlgorithm):
+    """
+    Unified Ordinary and Indicator Kriging Algorithm for Mineral Resource Estimation.
+    Developed for compliance with Qualified Person (QP) standards.
+    """
+    
+    INPUT = 'INPUT'
+    VALUE_FIELD = 'VALUE_FIELD'
+    KRIGING_TYPE = 'KRIGING_TYPE'
+    THRESHOLD = 'THRESHOLD'
+    MASK = 'MASK'
+    VARIOGRAM_MODEL = 'VARIOGRAM_MODEL'
+    CELL_SIZE = 'CELL_SIZE'
+    OUTPUT = 'OUTPUT'
+    
+    KTYPES = ['Ordinary Kriging (Grades)', 'Indicator Kriging (Probability)']
 
-
-class KrigingAlgorithm(QgsProcessingAlgorithm):
-    """Processing algorithm for Kriging interpolation."""
-
-    INPUT_LAYER = "INPUT_LAYER"
-    Z_FIELD = "Z_FIELD"
-    VARIOGRAM_FILE = "VARIOGRAM_FILE"
-    METHOD = "METHOD"
-    CELL_SIZE = "CELL_SIZE"
-    BOUNDARY_LAYER = "BOUNDARY_LAYER"
-    USE_CONVEX_HULL = "USE_CONVEX_HULL"
-    CUTOFF = "CUTOFF"
-    DRIFT_RASTER = "DRIFT_RASTER"
-    DRIFT_TERMS = "DRIFT_TERMS"
-    RUN_VALIDATION = "RUN_VALIDATION"
-    OUTPUT_RASTER = "OUTPUT_RASTER"
-    OUTPUT_VARIANCE = "OUTPUT_VARIANCE"
-    OUTPUT_REPORT = "OUTPUT_REPORT"
-
-    METHODS = ["ordinary", "universal", "external_drift", "indicator"]
-    METHOD_LABELS = [
-        "Ordinary Kriging (OK)",
-        "Universal Kriging (UK)",
-        "External Drift Kriging (EDK)",
-        "Indicator Kriging (IK)",
-    ]
-    DRIFT_OPTIONS = ["regional_linear", "regional_quadratic"]
-
-    def name(self) -> str:
-        return "kriging_interpolation"
-
-    def displayName(self) -> str:
-        return "Kriging Interpolation"
-
-    def group(self) -> str:
-        return "Interpolation"
-
-    def groupId(self) -> str:
-        return "interpolation"
-
-    def shortHelpString(self) -> str:
-        return (
-            "Kriging interpolation using a fitted variogram model.\n\n"
-            "Methods:\n"
-            "- Ordinary Kriging (OK): Standard kriging, assumes constant unknown mean.\n"
-            "- Universal Kriging (UK): Kriging with polynomial drift (trend).\n"
-            "- External Drift Kriging (EDK): Uses an auxiliary raster as drift function.\n"
-            "- Indicator Kriging (IK): Estimates probability above a cutoff threshold.\n\n"
-            "The variogram model must be provided as a JSON file (output of Variogram Modeling).\n"
-            "A boundary polygon can be used to mask the output raster."
-        )
+    def tr(self, string):
+        return QCoreApplication.translate('Processing', string)
 
     def createInstance(self):
-        return KrigingAlgorithm()
+        return UnifiedKrigingAlgorithm()
+
+    def name(self):
+        return 'unifiedkriging'
+
+    def displayName(self):
+        return self.tr('Ordinary and Indicator Kriging')
+
+    def group(self):
+        return self.tr('Geostatistics')
+
+    def groupId(self):
+        return 'geostatistics'
 
     def initAlgorithm(self, config=None):
-        """Define algorithm inputs and outputs."""
-        self.addParameter(
-            QgsProcessingParameterVectorLayer(
-                self.INPUT_LAYER,
-                "Input Point Layer",
-                [QgsProcessing.TypeVectorPoint],
-            )
-        )
+        self.addParameter(QgsProcessingParameterFeatureSource(
+            self.INPUT, self.tr('Input Point Layer'), [QgsProcessing.TypeVectorPoint]))
 
-        self.addParameter(
-            QgsProcessingParameterField(
-                self.Z_FIELD,
-                "Z Field (Variable to Interpolate)",
-                parentLayerParameterName=self.INPUT_LAYER,
-                type=QgsProcessingParameterField.DataType.Numeric,
-            )
-        )
+        self.addParameter(QgsProcessingParameterField(
+            self.VALUE_FIELD, self.tr('Value Field (Z)'), 
+            parentLayerParameterName=self.INPUT, type=QgsProcessingParameterField.Numeric))
 
-        self.addParameter(
-            QgsProcessingParameterFile(
-                self.VARIOGRAM_FILE,
-                "Variogram Model (JSON)",
-                extension="json",
-            )
-        )
+        self.addParameter(QgsProcessingParameterEnum(
+            self.KRIGING_TYPE, self.tr('Kriging Type'), options=self.KTYPES, defaultValue=0))
 
-        self.addParameter(
-            QgsProcessingParameterEnum(
-                self.METHOD,
-                "Kriging Method",
-                options=self.METHOD_LABELS,
-                defaultValue=0,
-            )
-        )
+        self.addParameter(QgsProcessingParameterNumber(
+            self.THRESHOLD, self.tr('Cut-off (Indicator Kriging Only)'), 
+            type=QgsProcessingParameterNumber.Double, defaultValue=1.0))
 
-        self.addParameter(
-            QgsProcessingParameterNumber(
-                self.CELL_SIZE,
-                "Cell Size (Grid Resolution)",
-                type=QgsProcessingParameterNumber.Type.Double,
-                defaultValue=100.0,
-                minValue=0.01,
-            )
-        )
+        self.addParameter(QgsProcessingParameterFeatureSource(
+            self.MASK, self.tr('Boundary Polygon (Optional - GDAL Clip)'), 
+            [QgsProcessing.TypeVectorPolygon], optional=True))
 
-        self.addParameter(
-            QgsProcessingParameterVectorLayer(
-                self.BOUNDARY_LAYER,
-                "Boundary Polygon (optional)",
-                [QgsProcessing.TypeVectorPolygon],
-                optional=True,
-            )
-        )
+        self.addParameter(QgsProcessingParameterFile(
+            self.VARIOGRAM_MODEL, self.tr('Variogram Parameter File (.json)'),
+            behavior=QgsProcessingParameterFile.File, extension='json'))
 
-        self.addParameter(
-            QgsProcessingParameterBoolean(
-                self.USE_CONVEX_HULL,
-                "Use Convex Hull as Boundary (if no polygon provided)",
-                defaultValue=True,
-            )
-        )
+        self.addParameter(QgsProcessingParameterNumber(
+            self.CELL_SIZE, self.tr('Cell Size (Block Size)'), 
+            type=QgsProcessingParameterNumber.Double, defaultValue=10.0))
 
-        # Indicator Kriging: cutoff
-        self.addParameter(
-            QgsProcessingParameterNumber(
-                self.CUTOFF,
-                "Indicator Kriging: Cutoff Value",
-                type=QgsProcessingParameterNumber.Type.Double,
-                defaultValue=0.0,
-                optional=True,
-            )
-        )
+        self.addParameter(QgsProcessingParameterRasterDestination(
+            self.OUTPUT, self.tr('Output Raster (Estimation)')))
 
-        # External Drift: raster
-        self.addParameter(
-            QgsProcessingParameterRasterLayer(
-                self.DRIFT_RASTER,
-                "External Drift Raster (for EDK)",
-                optional=True,
-            )
-        )
+    def validate_data(self, points_x, points_y, values):
+        x = np.array(points_x)
+        y = np.array(points_y)
+        z = np.array(values)
+        
+        initial_count = len(z)
+        
+        # 1. Deduplication
+        coords = np.column_stack((x, y))
+        _, unique_indices = np.unique(coords, axis=0, return_index=True)
+        unique_indices.sort()
+        
+        x, y, z = x[unique_indices], y[unique_indices], z[unique_indices]
+        
+        if len(z) < initial_count:
+            QgsMessageLog.logMessage(f"Removed {initial_count - len(z)} duplicate coordinates.", "Geostatistics Analysis", Qgis.Warning)
+            
+        # 2. Outlier Detection
+        if len(z) > 0:
+            q1 = np.percentile(z, 25)
+            q3 = np.percentile(z, 75)
+            iqr = q3 - q1
+            upper_bound = q1 + 3 * iqr 
+            lower_bound = q1 - 3 * iqr
+            
+            outlier_mask = (z > upper_bound) | (z < lower_bound)
+            n_outliers = np.sum(outlier_mask)
+            
+            if n_outliers > 0:
+                QgsMessageLog.logMessage(f"Detected {n_outliers} extreme outliers beyond 3x IQR.", "Geostatistics Analysis", Qgis.Warning)
+            
+        return x, y, z
 
-        # Universal Kriging: drift terms
-        self.addParameter(
-            QgsProcessingParameterEnum(
-                self.DRIFT_TERMS,
-                "Drift Type (for UK)",
-                options=["Regional Linear", "Regional Quadratic"],
-                defaultValue=0,
-                optional=True,
-            )
-        )
+    def create_raster(self, z_array, grid_x, grid_y, cell_size, crs, output_path, is_indicator=False):
+        cols = len(grid_x)
+        rows = len(grid_y)
+        
+        origin_x = np.min(grid_x) - cell_size/2.0
+        origin_y = np.max(grid_y) + cell_size/2.0
+        
+        driver = gdal.GetDriverByName('GTiff')
+        out_raster = driver.Create(output_path, cols, rows, 1, gdal.GDT_Float32)
+        out_raster.SetGeoTransform((origin_x, cell_size, 0, origin_y, 0, -cell_size))
+        
+        if crs.isValid():
+            out_srs = osr.SpatialReference()
+            out_srs.ImportFromWkt(crs.toWkt())
+            out_raster.SetProjection(out_srs.ExportToWkt())
+            
+        out_band = out_raster.GetRasterBand(1)
+        z_array = np.flipud(z_array) 
+        
+        if is_indicator:
+             z_array = np.clip(z_array, 0.0, 1.0)
+             
+        out_band.WriteArray(z_array)
+        
+        z_array[np.isnan(z_array)] = -9999
+        out_band.SetNoDataValue(-9999)
+        out_band.FlushCache()
+        out_raster = None
+        return output_path
 
-        # Cross-validation option
-        self.addParameter(
-            QgsProcessingParameterBoolean(
-                self.RUN_VALIDATION,
-                "Run Leave-One-Out Cross-Validation",
-                defaultValue=False,
-            )
-        )
+    def processAlgorithm(self, parameters, context, feedback):
+        try:
+            source = self.parameterAsSource(parameters, self.INPUT, context)
+            if source is None:
+                raise Exception('Invalid input layer.')
 
-        # Outputs
-        self.addParameter(
-            QgsProcessingParameterRasterDestination(
-                self.OUTPUT_RASTER,
-                "Output Kriging Raster",
-            )
-        )
+            field_name = self.parameterAsString(parameters, self.VALUE_FIELD, context)
+            krig_type = self.parameterAsInt(parameters, self.KRIGING_TYPE, context)
+            threshold = self.parameterAsDouble(parameters, self.THRESHOLD, context)
+            cell_size = self.parameterAsDouble(parameters, self.CELL_SIZE, context)
+            final_output_path = self.parameterAsOutputLayer(parameters, self.OUTPUT, context)
+            
+            # Mask layer string/ID needed for GDAL clip
+            mask_layer_val = parameters.get(self.MASK, None)
+            
+            # Mask geometry for PyKrige performance acceleration
+            mask_source = self.parameterAsSource(parameters, self.MASK, context)
+            mask_polygons = []
+            mask_bbox = None
+            if mask_source is not None:
+                for f in mask_source.getFeatures():
+                    geom = f.geometry()
+                    if mask_bbox is None:
+                        mask_bbox = geom.boundingBox()
+                    else:
+                        mask_bbox.combineExtentWith(geom.boundingBox())
+                    if geom.isMultipart():
+                        polygons = geom.asMultiPolygon()
+                    else:
+                        polygons = [geom.asPolygon()]
+                    for poly in polygons:
+                        if poly and len(poly) > 0:
+                            mask_polygons.append([(pt.x(), pt.y()) for pt in poly[0]])
 
-        self.addParameter(
-            QgsProcessingParameterRasterDestination(
-                self.OUTPUT_VARIANCE,
-                "Output Variance Raster",
-                optional=True,
-            )
-        )
+            is_indicator = (krig_type == 1)
 
-        self.addParameter(
-            QgsProcessingParameterFileDestination(
-                self.OUTPUT_REPORT,
-                "Output PDF Report (optional)",
-                fileFilter="PDF files (*.pdf)",
-                optional=True,
-            )
-        )
+            points_x, points_y, values = [], [], []
+            for feature in source.getFeatures():
+                geom = feature.geometry().asPoint()
+                val = feature[field_name]
+                if val is not None:
+                    points_x.append(geom.x())
+                    points_y.append(geom.y())
+                    
+                    if is_indicator:
+                         values.append(1.0 if float(val) >= threshold else 0.0)
+                    else:
+                         values.append(float(val))
 
-    def processAlgorithm(
-        self,
-        parameters: dict,
-        context: QgsProcessingContext,
-        feedback: QgsProcessingFeedback,
-    ) -> dict:
-        """Execute the kriging algorithm."""
-        layer = self.parameterAsVectorLayer(parameters, self.INPUT_LAYER, context)
-        z_field = self.parameterAsString(parameters, self.Z_FIELD, context)
-        vario_path = self.parameterAsString(parameters, self.VARIOGRAM_FILE, context)
-        method_idx = self.parameterAsEnum(parameters, self.METHOD, context)
-        cell_size = self.parameterAsDouble(parameters, self.CELL_SIZE, context)
-        boundary_layer = self.parameterAsVectorLayer(parameters, self.BOUNDARY_LAYER, context)
-        use_hull = self.parameterAsBool(parameters, self.USE_CONVEX_HULL, context)
-        cutoff = self.parameterAsDouble(parameters, self.CUTOFF, context)
-        drift_raster = self.parameterAsRasterLayer(parameters, self.DRIFT_RASTER, context)
-        drift_idx = self.parameterAsEnum(parameters, self.DRIFT_TERMS, context)
-        run_cv = self.parameterAsBool(parameters, self.RUN_VALIDATION, context)
-        output_path = self.parameterAsOutputLayer(parameters, self.OUTPUT_RASTER, context)
-        variance_path = self.parameterAsOutputLayer(parameters, self.OUTPUT_VARIANCE, context)
-        report_path = self.parameterAsString(parameters, self.OUTPUT_REPORT, context)
+            if len(values) < 3:
+                raise Exception("Insufficient points for Kriging.")
 
-        method = self.METHODS[method_idx]
-        feedback.pushInfo(f"Kriging method: {self.METHOD_LABELS[method_idx]}")
-
-        # ── Load variogram model ──
-        feedback.pushInfo(f"Loading variogram model from: {vario_path}")
-        model = VariogramModel.from_json(vario_path)
-        feedback.pushInfo(
-            f"Model: {model.model_type}, N={model.nugget:.4f}, "
-            f"S={model.sill:.4f}, R={model.range_:.2f}"
-        )
-
-        # ── Extract data ──
-        coords_list, values_list = [], []
-        for feature in layer.getFeatures():
-            geom = feature.geometry()
-            if geom.isNull():
-                continue
-            point = geom.asPoint()
-            val = feature[z_field]
-            if val is None:
-                continue
-            try:
-                coords_list.append([point.x(), point.y()])
-                values_list.append(float(val))
-            except (ValueError, TypeError):
-                continue
-
-        coords = np.array(coords_list)
-        values = np.array(values_list)
-
-        # ── Validate ──
-        validation = validate_input_data(coords, values)
-        for w in validation["warnings"]:
-            feedback.pushWarning(w)
-        for e in validation["errors"]:
-            feedback.reportError(e, fatalError=True)
-            return {}
-
-        clean_coords = validation["clean_coords"]
-        clean_values = validation["clean_values"]
-        feedback.pushInfo(f"Valid samples: {len(clean_values)}")
-
-        # ── Bounding box and grid ──
-        extent = layer.extent()
-        x_min, x_max = extent.xMinimum(), extent.xMaximum()
-        y_min, y_max = extent.yMinimum(), extent.yMaximum()
-
-        # Add buffer of 1 cell around extent
-        x_min -= cell_size
-        x_max += cell_size
-        y_min -= cell_size
-        y_max += cell_size
-
-        grid_x, grid_y, n_cols, n_rows = generate_grid(
-            x_min, x_max, y_min, y_max, cell_size,
-        )
-        feedback.pushInfo(f"Grid: {n_cols} × {n_rows} cells (cell size: {cell_size})")
-
-        if feedback.isCanceled():
-            return {}
-
-        # ── Prepare kriging kwargs ──
-        kriging_kwargs = {}
-        if method == "indicator":
-            kriging_kwargs["cutoff"] = cutoff
-            feedback.pushInfo(f"Indicator Kriging cutoff: {cutoff}")
-        elif method == "universal":
-            drift = self.DRIFT_OPTIONS[drift_idx]
-            kriging_kwargs["drift_terms"] = drift
-            feedback.pushInfo(f"UK drift type: {drift}")
-        elif method == "external_drift":
-            if drift_raster is None:
-                feedback.reportError(
-                    "External Drift Kriging requires a drift raster.", fatalError=True,
-                )
-                return {}
-            # Extract drift values at sample locations and on grid
-            kriging_kwargs.update(
-                self._extract_drift_data(drift_raster, clean_coords, grid_x, grid_y, feedback)
-            )
-
-        # ── Run Kriging ──
-        feedback.pushInfo("Running kriging interpolation...")
-        feedback.setProgress(30)
-
-        z_pred, ss_pred = run_kriging(
-            method=method,
-            coords=clean_coords,
-            values=clean_values,
-            grid_x=grid_x,
-            grid_y=grid_y,
-            model=model,
-            **kriging_kwargs,
-        )
-
-        feedback.setProgress(70)
-        feedback.pushInfo("Kriging completed.")
-
-        # ── Apply boundary mask ──
-        boundary_geom = None
-        if boundary_layer is not None:
-            feedback.pushInfo("Applying polygon boundary mask...")
-            for feature in boundary_layer.getFeatures():
-                wkt = feature.geometry().asWkt()
-                boundary_geom = boundary_from_layer_wkt(wkt)
-                break  # Use first polygon
-        elif use_hull:
-            feedback.pushInfo("Applying convex hull boundary mask...")
-            boundary_geom = compute_convex_hull(clean_coords)
-
-        nodata = -9999.0
-        if boundary_geom is not None:
-            mask = create_boundary_mask(grid_x, grid_y, boundary_geom)
-            z_pred = apply_mask(z_pred, mask, nodata=nodata)
-            ss_pred = apply_mask(ss_pred, mask, nodata=nodata)
-            feedback.pushInfo("Boundary mask applied.")
-
-        feedback.setProgress(85)
-
-        # ── Write output rasters ──
-        crs_wkt = layer.crs().toWkt() if layer.crs().isValid() else ""
-
-        create_output_raster(
-            output_path, z_pred, x_min, y_max, cell_size, crs_wkt, nodata,
-        )
-        feedback.pushInfo(f"Kriging raster saved: {output_path}")
-
-        results = {self.OUTPUT_RASTER: output_path}
-
-        if variance_path:
-            create_output_raster(
-                variance_path, ss_pred, x_min, y_max, cell_size, crs_wkt, nodata,
-            )
-            feedback.pushInfo(f"Variance raster saved: {variance_path}")
-            results[self.OUTPUT_VARIANCE] = variance_path
-
-        # ── Cross-validation ──
-        cv_results = None
-        if run_cv:
-            cv_results = self._run_cross_validation(
-                clean_coords, clean_values, model, method, kriging_kwargs, feedback,
-            )
-
-        # ── PDF Report ──
-        if report_path:
-            self._generate_report(
-                report_path, layer, z_field, validation,
-                model, method, cell_size, n_cols, n_rows,
-                boundary_layer, use_hull, cutoff, drift_idx,
-                output_path, cv_results, feedback,
-            )
-            results[self.OUTPUT_REPORT] = report_path
-
-        feedback.setProgress(100)
-
-        QgsMessageLog.logMessage(
-            f"Kriging ({method}) completed: {n_cols}x{n_rows} grid",
-            "GeoStats", Qgis.MessageLevel.Info,
-        )
-
-        return results
-
-    # ------------------------------------------------------------------
-    # Private helpers
-    # ------------------------------------------------------------------
-
-    def _extract_drift_data(
-        self,
-        drift_raster,
-        coords: np.ndarray,
-        grid_x: np.ndarray,
-        grid_y: np.ndarray,
-        feedback: QgsProcessingFeedback,
-    ) -> dict:
-        """Extract drift values from a raster at sample and grid locations."""
-        from osgeo import gdal
-        ds = gdal.Open(drift_raster.source())
-        band = ds.GetRasterBand(1)
-        gt = ds.GetGeoTransform()
-
-        def _sample_raster(x, y):
-            col = int((x - gt[0]) / gt[1])
-            row = int((y - gt[3]) / gt[5])
-            col = max(0, min(col, ds.RasterXSize - 1))
-            row = max(0, min(row, ds.RasterYSize - 1))
-            return float(band.ReadAsArray(col, row, 1, 1)[0, 0])
-
-        # At sample locations
-        drift_at_samples = np.array([_sample_raster(x, y) for x, y in coords])
-
-        # On grid
-        ny, nx = len(grid_y), len(grid_x)
-        drift_grid = np.zeros((ny, nx))
-        for j, y in enumerate(grid_y):
-            for i, x in enumerate(grid_x):
-                drift_grid[j, i] = _sample_raster(x, y)
-
-        ds = None
-        feedback.pushInfo(f"Drift data extracted: {len(drift_at_samples)} samples + {ny}×{nx} grid")
-
-        return {
-            "drift_values_at_samples": drift_at_samples,
-            "drift_grid": drift_grid,
-        }
-
-    def _run_cross_validation(
-        self,
-        coords: np.ndarray,
-        values: np.ndarray,
-        model: VariogramModel,
-        method: str,
-        kriging_kwargs: dict,
-        feedback: QgsProcessingFeedback,
-    ) -> dict:
-        """Run LOO cross-validation and report metrics."""
-        from ..core.validation import leave_one_out_cv
-
-        feedback.pushInfo("Running Leave-One-Out Cross-Validation...")
-
-        # Don't pass drift data for CV (would need per-sample extraction)
-        cv_kwargs = {k: v for k, v in kriging_kwargs.items()
-                     if k not in ("drift_values_at_samples", "drift_grid")}
-
-        cv_results = leave_one_out_cv(
-            coords, values, model, method=method, **cv_kwargs,
-        )
-
-        metrics = cv_results["metrics"]
-        feedback.pushInfo("=== Cross-Validation Results ===")
-        feedback.pushInfo(f"  ME  (Mean Error):          {metrics['ME']:.6f}")
-        feedback.pushInfo(f"  MAE (Mean Absolute Error): {metrics['MAE']:.6f}")
-        feedback.pushInfo(f"  RMSE:                      {metrics['RMSE']:.6f}")
-        feedback.pushInfo(f"  R2:                        {metrics['R2']:.6f}")
-        if not np.isnan(metrics['MSDR']):
-            feedback.pushInfo(f"  MSDR:                      {metrics['MSDR']:.6f}")
-        feedback.pushInfo("================================")
-
-        return cv_results
-
-    def _generate_report(
-        self,
-        report_path: str,
-        layer,
-        z_field: str,
-        validation: dict,
-        model: VariogramModel,
-        method: str,
-        cell_size: float,
-        n_cols: int,
-        n_rows: int,
-        boundary_layer,
-        use_hull: bool,
-        cutoff: float,
-        drift_idx: int,
-        output_raster_path: str,
-        cv_results: dict,
-        feedback: QgsProcessingFeedback,
-    ):
-        """Generate comprehensive PDF report."""
-        from ..reports.report_generator import generate_report
-
-        feedback.pushInfo("Generating PDF report...")
-
-        # Input info
-        input_info = {
-            "layer_name": layer.name(),
-            "field_name": z_field,
-            "n_samples": validation["n_valid"],
-            "crs": layer.crs().authid() if layer.crs().isValid() else "N/A",
-            "stats": validation.get("stats", {}),
-            "warnings": validation.get("warnings", []),
-        }
-
-        # Variogram info
-        variogram_info = {
-            "model_type": model.model_type,
-            "nugget": model.nugget,
-            "sill": model.sill,
-            "range": model.range_,
-            "direction": model.direction,
-            "aniso_ratio": model.aniso_ratio,
-            "fit_rmse": model.fit_rmse,
-            "lags": model.lags,
-            "semivariance": model.semivariance,
-        }
-
-        # Kriging info
-        boundary_type = "None"
-        if boundary_layer is not None:
-            boundary_type = f"Polygon: {boundary_layer.name()}"
-        elif use_hull:
-            boundary_type = "Convex Hull"
-
-        kriging_info = {
-            "method": self.METHOD_LABELS[self.METHODS.index(method)],
-            "cell_size": cell_size,
-            "grid_size": f"{n_cols} x {n_rows}",
-            "boundary_type": boundary_type,
-            "output_path": output_raster_path,
-            "cutoff": cutoff if method == "indicator" else None,
-            "drift_terms": self.DRIFT_OPTIONS[drift_idx] if method == "universal" else None,
-        }
-
-        # Validation info
-        validation_info = None
-        if cv_results is not None:
-            validation_info = {
-                "metrics": cv_results["metrics"],
-                "observed": cv_results["observed"].tolist(),
-                "predicted": cv_results["predicted"].tolist(),
-                "errors": cv_results["errors"].tolist(),
+            initial_count = len(values)
+            points_x, points_y, values = self.validate_data(points_x, points_y, values)
+            
+            data_stats = {
+                'total_points': len(values),
+                'duplicates_removed': initial_count - len(values),
+                'outliers_detected': 0
             }
 
-        generate_report(
-            output_path=report_path,
-            project_name=f"Kriging: {layer.name()} - {z_field}",
-            input_info=input_info,
-            variogram_info=variogram_info,
-            kriging_info=kriging_info,
-            validation_info=validation_info,
-        )
+            qp_params = {}
+            json_path = self.parameterAsFile(parameters, self.VARIOGRAM_MODEL, context)
+            import json
+            if json_path and os.path.exists(json_path):
+                with open(json_path, 'r') as f:
+                    qp_params = json.load(f)
+            else:
+                 raise Exception("No Variogram parameter file provided. Run the Variography module first.")
 
-        feedback.pushInfo(f"PDF report saved: {report_path}")
+            model_name = qp_params.get('model', 'spherical')
+            nugget = float(qp_params.get('nugget', 0))
+            sill = float(qp_params.get('sill', 1.0))
+            v_range = float(qp_params.get('range', 10.0))
+            angle = float(qp_params.get('anisotropy_angle', 0.0))
+            scaling = float(qp_params.get('anisotropy_scaling', 1.0))
+
+            feedback.pushInfo(f'Starting {self.KTYPES[krig_type]} with model: {model_name}')
+
+            ok = OrdinaryKriging(
+                points_x, points_y, values,
+                variogram_model=model_name,
+                variogram_parameters=[sill, v_range, nugget],
+                anisotropy_scaling=scaling,
+                anisotropy_angle=angle,
+                verbose=False, enable_plotting=False
+            )
+
+            if mask_bbox is not None:
+                min_x = mask_bbox.xMinimum()
+                max_x = mask_bbox.xMaximum()
+                min_y = mask_bbox.yMinimum()
+                max_y = mask_bbox.yMaximum()
+            else:
+                min_x, max_x = min(points_x), max(points_x)
+                min_y, max_y = min(points_y), max(points_y)
+
+            grid_x = np.arange(min_x, max_x + cell_size, cell_size)
+            grid_y = np.arange(min_y, max_y + cell_size, cell_size)
+            
+            mask_array = None
+            if mask_polygons:
+                feedback.pushInfo("Calculating grid geometry within polygon boundaries for optimization...")
+                import matplotlib.path as mpltPath
+                XX, YY = np.meshgrid(grid_x, grid_y)
+                points_grid = np.vstack((XX.ravel(), YY.ravel())).T
+                inside_mask = np.zeros(points_grid.shape[0], dtype=bool)
+                for exterior in mask_polygons:
+                    path = mpltPath.Path(exterior)
+                    inside_mask |= path.contains_points(points_grid)
+                mask_array = (~inside_mask).reshape(XX.shape)
+
+            feedback.pushInfo("Calculating interpolation. This may take a few minutes...")
+            
+            if mask_array is not None:
+                z, ss = ok.execute('masked', grid_x, grid_y, mask=mask_array)
+            else:
+                z, ss = ok.execute('grid', grid_x, grid_y)
+
+            # File Management for GDAL Clipping
+            temp_output = final_output_path if mask_layer_val is None else final_output_path.replace(".tif", "_temp.tif")
+            crs = source.sourceCrs()
+            
+            self.create_raster(z.data, grid_x, grid_y, cell_size, crs, temp_output, is_indicator)
+
+            # Native QGIS Geometric Masking (GDAL Clip)
+            if mask_layer_val is not None:
+                feedback.pushInfo("Applying strict geometric clipping using GDAL mask...")
+                import processing
+                clip_params = {
+                    'INPUT': temp_output,
+                    'MASK': mask_layer_val,
+                    'SOURCE_CRS': crs,
+                    'TARGET_CRS': crs,
+                    'NODATA': -9999,
+                    'ALPHA_BAND': False,
+                    'CROP_TO_CUTLINE': True,
+                    'KEEP_RESOLUTION': True,
+                    'OPTIONS': '',
+                    'DATA_TYPE': 0, # float32
+                    'OUTPUT': final_output_path
+                }
+                # Run standard Processing gdal algorithm
+                processing.run("gdal:cliprasterbymasklayer", clip_params, context=context, feedback=feedback)
+                
+                # Cleanup temporal raster
+                try:
+                     os.remove(temp_output)
+                except:
+                     pass
+
+            QgsMessageLog.logMessage(f"Raster successfully generated at {final_output_path}", "Geostatistics Analysis", Qgis.Success)
+            
+            # Generate QP Audit Report
+            try:
+                # FIX: Absolute path resolution to avoid relative import faults inside processing threads
+                base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+                if base_dir not in sys.path:
+                    sys.path.append(base_dir)
+                from reports.report_generator import QPReportGenerator
+                
+                report_dir = os.path.dirname(final_output_path) if final_output_path and os.path.dirname(final_output_path) else os.path.expanduser("~")
+                generator = QPReportGenerator(report_dir)
+                
+                # For Kriging report, we don't have CV data but we can provide model parameters
+                reporter_params = {
+                    'model': model_name,
+                    'nugget': nugget,
+                    'sill': sill,
+                    'range': v_range,
+                    'anisotropy_angle': angle,
+                    'cell_size': cell_size
+                }
+                generator.generate_pdf_report(reporter_params, data_stats)
+            except Exception as report_err:
+                QgsMessageLog.logMessage(f"Report generation failed: {report_err}.", "Geostatistics Analysis", Qgis.Warning)
+
+            feedback.setProgress(100)
+            return {self.OUTPUT: final_output_path}
+            
+        except Exception as e:
+            QgsMessageLog.logMessage(f"Geostatistical Error: {str(e)}", "Geostatistics Analysis", Qgis.Critical)
+            feedback.reportError(str(e))
+            raise e

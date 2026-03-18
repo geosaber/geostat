@@ -1,51 +1,64 @@
-# -*- coding: utf-8 -*-
-"""
-GeoStats Plugin - Main class
-=============================
-Manages plugin lifecycle: GUI integration, Processing provider registration,
-and resource cleanup.
-"""
-
 import os
+from qgis.PyQt.QtGui import QIcon
+from qgis.PyQt.QtWidgets import QAction
+from qgis.core import QgsProcessingAlgorithm, QgsApplication, QgsMessageLog, Qgis
 
-from qgis.core import QgsApplication, QgsMessageLog, Qgis
+# Import the extracted provider
+from .processing.provider import GeostatProvider
 
-from .processing.provider import GeoStatProvider
-
-
-class GeoStatPlugin:
-    """Main plugin class registered via classFactory."""
-
+class GeostatMineralPlugin:
+    """
+    Main class for the QGIS Geostatistics Plugin.
+    Manages UI integration and Processing Toolbox registration for the QP.
+    """
     def __init__(self, iface):
-        """
-        Args:
-            iface: QgisInterface providing access to QGIS GUI.
-        """
         self.iface = iface
         self.provider = None
         self.plugin_dir = os.path.dirname(__file__)
 
-    # ------------------------------------------------------------------
-    # QGIS lifecycle hooks
-    # ------------------------------------------------------------------
-
-    def initProcessing(self):
-        """Register the Processing provider (called by QGIS)."""
-        self.provider = GeoStatProvider()
-        QgsApplication.processingRegistry().addProvider(self.provider)
-        QgsMessageLog.logMessage(
-            "GeoStats provider registered.", "GeoStats", Qgis.MessageLevel.Info
-        )
-
     def initGui(self):
-        """Initialize the plugin GUI elements."""
-        self.initProcessing()
+        """
+        Initializes the plugin GUI and registers the Processing Provider.
+        """
+        # 1. Initialize and register the Processing Provider (Toolbox)
+        self.provider = GeostatProvider()
+        QgsApplication.processingRegistry().addProvider(self.provider)
+
+        # 2. Add an icon/action to the QGIS Toolbar for quick access
+        icon_path = os.path.join(self.plugin_dir, 'icons', 'icon.png')
+        self.action = QAction(
+            QIcon(icon_path),
+            "Geostatistics for Mineral Exploration (QP Tool)",
+            self.iface.mainWindow()
+        )
+        self.action.triggered.connect(self.run_quick_analysis)
+        
+        # Add to the 'Plugins' menu and Toolbar
+        self.iface.addPluginToMenu("&Mineral Exploration", self.action)
+        self.iface.addToolBarIcon(self.action)
+        
+        QgsMessageLog.logMessage("Geostat Plugin Initialized successfully", "Geostatistics Analysis", Qgis.Info)
 
     def unload(self):
-        """Clean up resources when plugin is unloaded."""
-        if self.provider is not None:
+        """
+        Cleans up the UI and unregisters the provider when the plugin is disabled.
+        """
+        if self.provider:
             QgsApplication.processingRegistry().removeProvider(self.provider)
-            self.provider = None
-        QgsMessageLog.logMessage(
-            "GeoStats plugin unloaded.", "GeoStats", Qgis.MessageLevel.Info
-        )
+        
+        self.iface.removeToolBarIcon(self.action)
+        self.iface.removePluginMenu("&Mineral Exploration", self.action)
+
+    def run_quick_analysis(self):
+        """
+        Helper method to open the Processing Toolbox focused on our Geostat algorithms.
+        """
+        import processing
+        try:
+            processing.execAlgorithmDialog("geostat_exploration:ordinarykriging")
+        except AttributeError:
+            pass # Fallback if processing dialog fails to open
+            
+        # In a full implementation, you could trigger the Variogram Dialog directly here.
+        QgsMessageLog.logMessage("Geostat Tool: Ready for Qualified Person validation.", "Geostatistics Analysis", Qgis.Info)
+

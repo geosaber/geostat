@@ -1,402 +1,134 @@
-# -*- coding: utf-8 -*-
-"""
-Report Generator
-==================
-Generates comprehensive PDF reports with full audit trail for
-Qualified Person (QP) compliance under JORC/NI 43-101/CBRR.
-
-Sections: Input Data, Variogram, Kriging, Validation, Metadata.
-Uses matplotlib PdfPages for embedded plots.
-"""
-
-from __future__ import annotations
-
 import os
-import datetime
 import numpy as np
-from typing import Dict, Any, Optional, List
-
-from matplotlib.backends.backend_pdf import PdfPages
-from matplotlib.figure import Figure
 import matplotlib.pyplot as plt
+from matplotlib.backends.backend_pdf import PdfPages
+from datetime import datetime
+from qgis.core import QgsMessageLog, Qgis
 
-
-def generate_report(
-    output_path: str,
-    project_name: str = "Geostatistical Analysis",
-    input_info: Optional[Dict[str, Any]] = None,
-    variogram_info: Optional[Dict[str, Any]] = None,
-    kriging_info: Optional[Dict[str, Any]] = None,
-    validation_info: Optional[Dict[str, Any]] = None,
-    extra_figures: Optional[List[Figure]] = None,
-) -> str:
-    """Generate a comprehensive PDF report.
-
-    Args:
-        output_path: Path for the output PDF file.
-        project_name: Name of the project/analysis.
-        input_info: Dictionary with input data information:
-            - layer_name, field_name, n_samples, crs, stats (dict)
-        variogram_info: Dictionary with variogram information:
-            - model_type, nugget, sill, range, direction, aniso_ratio
-            - lags, semivariance (for plotting)
-        kriging_info: Dictionary with kriging information:
-            - method, cell_size, boundary_type, output_path
-        validation_info: Dictionary with validation information:
-            - metrics (dict), observed, predicted, errors
-        extra_figures: Additional matplotlib Figures to include.
-
-    Returns:
-        Output PDF path.
+class QPReportGenerator:
     """
-    with PdfPages(output_path) as pdf:
-        # ── Title page ──
-        _add_title_page(pdf, project_name)
+    Generates a professional Qualified Person (QP) Audit Report in PDF format.
+    Includes technical metadata, variogram models, and cross-validation charts.
+    """
+    def __init__(self, output_dir):
+        self.output_dir = output_dir
 
-        # ── Input data section ──
-        if input_info:
-            _add_input_section(pdf, input_info)
+    def generate_pdf_report(self, kriging_params, data_stats, cv_metrics=None, 
+                             exp_lags=None, exp_gamma=None, model_lags=None, model_gamma=None,
+                             observed=None, predicted=None):
+        """
+        Creates a multi-page PDF report with charts using Matplotlib.
+        """
+        report_path = os.path.join(self.output_dir, "Geostat_Audit_Report.pdf")
+        
+        try:
+            with PdfPages(report_path) as pdf:
+                # --- Page 1: Metadata & Variogram ---
+                fig1 = plt.figure(figsize=(8.5, 11))
+                
+            with PdfPages(report_path) as pdf:
+                # --- Page 1: Metadata & Variogram ---
+                fig1 = plt.figure(figsize=(8.5, 11))
+                
+                # Title
+                fig1.text(0.5, 0.96, "GEOSTATISTICS ANALYSIS - AUDIT REPORT", 
+                         ha='center', fontsize=16, fontweight='bold')
+                fig1.text(0.5, 0.94, f"Date: {datetime.now().strftime('%Y-%m-%d %H:%M')}", 
+                         ha='center', fontsize=10)
+                
+                # Section 1: Data Validation
+                fig1.text(0.1, 0.88, "1. DATA VALIDATION SUMMARY", fontweight='bold')
+                stats_text = (f"Total Sample Points: {data_stats.get('total_points', 0)}\n"
+                             f"Duplicate Coordinates Removed: {data_stats.get('duplicates_removed', 0)}\n"
+                             f"Outliers Identified (>3x IQR): {data_stats.get('outliers_detected', 0)}")
+                fig1.text(0.12, 0.86, stats_text, va='top', fontsize=10)
+                
+                # Section 2: Model Parameters (Moved lower to avoid overcrowding)
+                fig1.text(0.1, 0.75, "2. VARIOGRAM MODEL PARAMETERS", fontweight='bold')
+                params_text = (f"Model Type: {kriging_params.get('model', 'N/A')}\n"
+                              f"Nugget Effect (C0): {kriging_params.get('nugget', 0):.4f}\n"
+                              f"Partial Sill (C): {kriging_params.get('sill', 0):.4f}\n"
+                              f"Major Range (a): {kriging_params.get('range', 0):.2f}\n"
+                              f"Anisotropy Angle: {kriging_params.get('anisotropy_angle', 0):.1f}°\n"
+                              f"Cell Resolution: {kriging_params.get('cell_size', 'N/A')}")
+                fig1.text(0.12, 0.73, params_text, va='top', fontsize=10)
 
-        # ── Variogram section ──
-        if variogram_info:
-            _add_variogram_section(pdf, variogram_info)
+                # Section 3: Variogram Visualization
+                if exp_lags is not None and len(exp_lags) > 0:
+                     fig1.text(0.1, 0.55, "VARIOGRAM MODEL VISUALLY FITTED", fontweight='bold', fontsize=9)
+                     ax_v = fig1.add_axes([0.15, 0.15, 0.7, 0.35])
+                     ax_v.scatter(exp_lags, exp_gamma, color='black', label='Experimental', marker='o', s=20)
+                     if model_lags is not None and model_gamma is not None:
+                          ax_v.plot(model_lags, model_gamma, 'r-', linewidth=2, label='Theoretical')
+                     ax_v.set_title("Experimental vs. Theoretical Variogram")
+                     ax_v.set_xlabel("Distance (Lag)")
+                     ax_v.set_ylabel("Semivariance")
+                     ax_v.legend(loc='lower right', fontsize=8)
+                     ax_v.grid(True, alpha=0.3)
 
-        # ── Kriging section ──
-        if kriging_info:
-            _add_kriging_section(pdf, kriging_info)
+                pdf.savefig(fig1)
+                plt.close(fig1)
+                
+                # --- Page 2: Cross-Validation ---
+                if (cv_metrics is not None) or (observed is not None and predicted is not None):
+                    fig2 = plt.figure(figsize=(8.5, 11))
+                    
+                    fig2.text(0.5, 0.96, "GEOSTATISTICS ANALYSIS - CROSS-VALIDATION", 
+                             ha='center', fontsize=14, fontweight='bold')
+                    
+                    # Section Title Metrics
+                    fig2.text(0.1, 0.88, "3. CROSS-VALIDATION DIAGNOSTICS (LOO)", fontweight='bold')
+                    
+                    if cv_metrics:
+                        metrics_text = (f"Mean Error (ME): {cv_metrics.get('me', 0):.4f}\n"
+                                       f"Mean Absolute Error (MAE): {cv_metrics.get('mae', 0):.4f}\n"
+                                       f"Root Mean Square Error (RMSE): {cv_metrics.get('rmse', 0):.4f}\n"
+                                       f"R-Squared (R²): {cv_metrics.get('r2', 0):.4f}\n"
+                                       f"Mean Std. Squared Error (MSDR): {cv_metrics.get('msdr', 0):.4f}")
+                        fig2.text(0.12, 0.86, metrics_text, va='top', fontsize=10, linespacing=1.5)
+                    
+                    # Scatter Plot: Observed vs Predicted (Lowered to avoid metrics)
+                    if observed is not None and predicted is not None:
+                        ax_s = fig2.add_axes([0.15, 0.40, 0.7, 0.30]) # Reduced height slightly and lowered
+                        min_val = min(np.min(observed), np.min(predicted))
+                        max_val = max(np.max(observed), np.max(predicted))
+                        
+                        ax_s.scatter(observed, predicted, alpha=0.5, color='blue', edgecolors='k', s=20)
+                        ax_s.plot([min_val, max_val], [min_val, max_val], 'r--', label='1:1 Line')
+                        ax_s.set_title("Scatter: Predicted vs Observed")
+                        ax_s.set_xlabel("Observed Value")
+                        ax_s.set_ylabel("Predicted Value (LOO)")
+                        ax_s.grid(True, alpha=0.3)
+                        
+                        # Error Histogram
+                        ax_h = fig2.add_axes([0.15, 0.08, 0.7, 0.22]) # Placed at the bottom
+                        errors = predicted - observed
+                        ax_h.hist(errors, bins=15, color='gray', alpha=0.7, edgecolor='black')
+                        ax_h.set_title("Residuals Error Distribution")
+                        ax_h.set_xlabel("Error (Pred - Obs)")
+                        ax_h.grid(True, axis='y', alpha=0.3)
+                    
+                    pdf.savefig(fig2)
+                    plt.close(fig2)
 
-        # ── Validation section ──
-        if validation_info:
-            _add_validation_section(pdf, validation_info)
+            QgsMessageLog.logMessage(f"Professional PDF Audit Report: {report_path}", "Geostatistics Analysis", Qgis.Success)
+            return report_path
+            
+        except Exception as e:
+            QgsMessageLog.logMessage(f"Failed to generate PDF report: {e}", "Geostatistics Analysis", Qgis.Warning)
+            # Fallback to Text if PDF fails (e.g. environment issues)
+            return self.generate_text_report(kriging_params, data_stats, report_path.replace(".pdf", ".txt"))
 
-        # ── Extra figures ──
-        if extra_figures:
-            for fig in extra_figures:
-                pdf.savefig(fig)
-                plt.close(fig)
-
-        # ── Metadata / Audit Trail ──
-        _add_metadata_page(pdf)
-
-    return output_path
-
-
-# ======================================================================
-# Section generators
-# ======================================================================
-
-def _add_title_page(pdf: PdfPages, project_name: str):
-    """Add title page to the report."""
-    fig, ax = plt.subplots(figsize=(8.5, 11))
-    ax.axis("off")
-
-    ax.text(
-        0.5, 0.7, project_name,
-        transform=ax.transAxes, fontsize=24, fontweight="bold",
-        ha="center", va="center",
-    )
-    ax.text(
-        0.5, 0.6, "Geostatistical Analysis Report",
-        transform=ax.transAxes, fontsize=16,
-        ha="center", va="center", color="#555555",
-    )
-    ax.text(
-        0.5, 0.5,
-        f"Generated: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
-        transform=ax.transAxes, fontsize=12,
-        ha="center", va="center", color="#777777",
-    )
-    ax.text(
-        0.5, 0.3,
-        "GeoStats Plugin for QGIS\n"
-        "Audit-compliant report for JORC / NI 43-101 / CBRR",
-        transform=ax.transAxes, fontsize=10,
-        ha="center", va="center", color="#999999",
-    )
-
-    # Footer disclaimer
-    ax.text(
-        0.5, 0.08,
-        "DISCLAIMER: This report is generated by automated geostatistical software.\n"
-        "All results must be reviewed by a Qualified Person (QP) before use in\n"
-        "resource estimation or public disclosure.",
-        transform=ax.transAxes, fontsize=8,
-        ha="center", va="center", color="#cc0000",
-        style="italic",
-        bbox=dict(boxstyle="round", facecolor="#fff0f0", edgecolor="#cc0000", alpha=0.8),
-    )
-
-    fig.tight_layout()
-    pdf.savefig(fig)
-    plt.close(fig)
-
-
-def _add_input_section(pdf: PdfPages, info: Dict[str, Any]):
-    """Add input data summary page."""
-    fig, ax = plt.subplots(figsize=(8.5, 11))
-    ax.axis("off")
-
-    ax.text(0.5, 0.95, "1. Input Data Summary", fontsize=18, fontweight="bold",
-            ha="center", va="top", transform=ax.transAxes)
-
-    lines = [
-        f"Layer: {info.get('layer_name', 'N/A')}",
-        f"Variable: {info.get('field_name', 'N/A')}",
-        f"Samples: {info.get('n_samples', 'N/A')}",
-        f"CRS: {info.get('crs', 'N/A')}",
-    ]
-
-    # Add descriptive stats
-    stats = info.get("stats", {})
-    if stats:
-        lines.append("")
-        lines.append("─── Descriptive Statistics ───")
-        for key, val in stats.items():
-            if isinstance(val, float):
-                lines.append(f"  {key:>12s}: {val:>12.4f}")
-            else:
-                lines.append(f"  {key:>12s}: {val}")
-
-    # Warnings
-    warnings = info.get("warnings", [])
-    if warnings:
-        lines.append("")
-        lines.append("─── Data Quality Warnings ───")
-        for w in warnings:
-            lines.append(f"  ⚠ {w}")
-
-    text = "\n".join(lines)
-    ax.text(0.1, 0.85, text, fontsize=10, family="monospace",
-            va="top", transform=ax.transAxes)
-
-    fig.tight_layout()
-    pdf.savefig(fig)
-    plt.close(fig)
-
-
-def _add_variogram_section(pdf: PdfPages, info: Dict[str, Any]):
-    """Add variogram model page with plot."""
-    # Parameters page
-    fig, axes = plt.subplots(1, 2, figsize=(11, 5.5))
-
-    # Left: text summary
-    ax_text = axes[0]
-    ax_text.axis("off")
-    ax_text.text(0.0, 1.0, "2. Variogram Model", fontsize=16, fontweight="bold",
-                 va="top", transform=ax_text.transAxes)
-
-    params_text = (
-        f"Model:      {info.get('model_type', 'N/A')}\n"
-        f"Nugget:     {info.get('nugget', 0):.4f}\n"
-        f"Sill:       {info.get('sill', 0):.4f}\n"
-        f"Range:      {info.get('range', 0):.2f}\n"
-        f"Direction:  {info.get('direction', 0):.1f}°\n"
-        f"Aniso Ratio:{info.get('aniso_ratio', 1.0):.3f}\n"
-        f"Fit RMSE:   {info.get('fit_rmse', 0):.6f}"
-    )
-    ax_text.text(0.05, 0.8, params_text, fontsize=11, family="monospace",
-                 va="top", transform=ax_text.transAxes)
-
-    # Right: variogram plot
-    ax_plot = axes[1]
-    lags = info.get("lags", [])
-    semiv = info.get("semivariance", [])
-    if lags and semiv:
-        ax_plot.scatter(lags, semiv, c="#2c3e50", s=40, edgecolors="#ecf0f1",
-                        linewidths=0.5, label="Experimental", zorder=5)
-
-        # Theoretical curve
-        from ..core.variography import MODEL_FUNCTIONS
-        model_type = info.get("model_type", "spherical")
-        if model_type in MODEL_FUNCTIONS:
-            h_smooth = np.linspace(0, max(lags) * 1.1, 200)
-            gamma = MODEL_FUNCTIONS[model_type](
-                h_smooth, info.get("nugget", 0),
-                info.get("sill", 1), info.get("range", 1),
-            )
-            ax_plot.plot(h_smooth, gamma, "-", color="#e74c3c", linewidth=2,
-                         label=f"{model_type.capitalize()}")
-
-        ax_plot.axhline(info.get("sill", 1), color="#95a5a6", linestyle="--",
-                        linewidth=0.8, alpha=0.7)
-        ax_plot.set_xlabel("Lag Distance")
-        ax_plot.set_ylabel("Semivariance")
-        ax_plot.set_title("Fitted Variogram")
-        ax_plot.legend(fontsize=8)
-        ax_plot.grid(True, alpha=0.3)
-
-    fig.tight_layout()
-    pdf.savefig(fig)
-    plt.close(fig)
-
-
-def _add_kriging_section(pdf: PdfPages, info: Dict[str, Any]):
-    """Add kriging configuration page."""
-    fig, ax = plt.subplots(figsize=(8.5, 11))
-    ax.axis("off")
-
-    ax.text(0.5, 0.95, "3. Kriging Configuration", fontsize=18, fontweight="bold",
-            ha="center", va="top", transform=ax.transAxes)
-
-    lines = [
-        f"Method:        {info.get('method', 'N/A')}",
-        f"Cell Size:     {info.get('cell_size', 'N/A')}",
-        f"Grid Size:     {info.get('grid_size', 'N/A')}",
-        f"Boundary:      {info.get('boundary_type', 'N/A')}",
-        f"Output Raster: {info.get('output_path', 'N/A')}",
-    ]
-
-    if info.get("cutoff") is not None:
-        lines.append(f"IK Cutoff:     {info['cutoff']}")
-    if info.get("drift_terms"):
-        lines.append(f"Drift Type:    {info['drift_terms']}")
-
-    text = "\n".join(lines)
-    ax.text(0.1, 0.85, text, fontsize=11, family="monospace",
-            va="top", transform=ax.transAxes)
-
-    fig.tight_layout()
-    pdf.savefig(fig)
-    plt.close(fig)
-
-
-def _add_validation_section(pdf: PdfPages, info: Dict[str, Any]):
-    """Add cross-validation results page with plots."""
-    metrics = info.get("metrics", {})
-
-    # Metrics summary page
-    fig, ax = plt.subplots(figsize=(8.5, 6))
-    ax.axis("off")
-
-    ax.text(0.5, 0.95, "4. Cross-Validation Results", fontsize=18, fontweight="bold",
-            ha="center", va="top", transform=ax.transAxes)
-
-    metrics_text = (
-        "─── Validation Metrics ───\n\n"
-        f"  ME  (Mean Error):              {metrics.get('ME', 0):>12.6f}\n"
-        f"  MAE (Mean Absolute Error):     {metrics.get('MAE', 0):>12.6f}\n"
-        f"  RMSE (Root Mean Square Error): {metrics.get('RMSE', 0):>12.6f}\n"
-        f"  R² (Coefficient of Det.):      {metrics.get('R2', 0):>12.6f}\n"
-        f"  MSDR (Mean Std Dev Ratio):     {metrics.get('MSDR', 0):>12.6f}\n"
-        "\n"
-        "─── Interpretation ───\n\n"
-        "  ME ≈ 0 indicates unbiased estimation.\n"
-        "  MSDR ≈ 1 indicates correct variance estimation.\n"
-        f"  R² = {metrics.get('R2', 0):.4f} — "
-    )
-
-    r2 = metrics.get("R2", 0)
-    if r2 > 0.8:
-        metrics_text += "Good model fit."
-    elif r2 > 0.5:
-        metrics_text += "Moderate model fit."
-    else:
-        metrics_text += "Poor model fit — consider revising the variogram."
-
-    ax.text(0.1, 0.85, metrics_text, fontsize=10, family="monospace",
-            va="top", transform=ax.transAxes)
-
-    fig.tight_layout()
-    pdf.savefig(fig)
-    plt.close(fig)
-
-    # Validation plots
-    observed = info.get("observed")
-    predicted = info.get("predicted")
-    errors = info.get("errors")
-
-    if observed is not None and predicted is not None:
-        observed = np.asarray(observed)
-        predicted = np.asarray(predicted)
-
-        # Scatter plot
-        fig, ax = plt.subplots(figsize=(6, 5))
-        valid = ~np.isnan(predicted) & ~np.isnan(observed)
-        ax.scatter(observed[valid], predicted[valid], c="#2c3e50", s=25, alpha=0.7,
-                   edgecolors="#ecf0f1", linewidths=0.5)
-        lims = [min(observed[valid].min(), predicted[valid].min()),
-                max(observed[valid].max(), predicted[valid].max())]
-        ax.plot(lims, lims, "--", color="#e74c3c", linewidth=1.5, label="1:1 Line")
-        ax.set_xlabel("Observed")
-        ax.set_ylabel("Predicted")
-        ax.set_title("Cross-Validation: Observed vs Predicted")
-        ax.legend()
-        ax.grid(True, alpha=0.3)
-        fig.tight_layout()
-        pdf.savefig(fig)
-        plt.close(fig)
-
-    if errors is not None:
-        errors = np.asarray(errors)
-        valid_err = errors[~np.isnan(errors)]
-
-        # Error histogram
-        fig, ax = plt.subplots(figsize=(6, 5))
-        ax.hist(valid_err, bins=25, color="#3498db", edgecolor="#2c3e50", alpha=0.8)
-        ax.axvline(0, color="#e74c3c", linewidth=1.5, linestyle="--")
-        ax.set_xlabel("Error (Predicted - Observed)")
-        ax.set_ylabel("Frequency")
-        ax.set_title("Error Distribution")
-        ax.grid(True, alpha=0.3)
-        fig.tight_layout()
-        pdf.savefig(fig)
-        plt.close(fig)
-
-
-def _add_metadata_page(pdf: PdfPages):
-    """Add audit metadata page (software versions, timestamp)."""
-    fig, ax = plt.subplots(figsize=(8.5, 11))
-    ax.axis("off")
-
-    ax.text(0.5, 0.95, "Audit Trail — Metadata", fontsize=18, fontweight="bold",
-            ha="center", va="top", transform=ax.transAxes)
-
-    try:
-        import numpy as np_ver
-        np_version = np_ver.__version__
-    except Exception:
-        np_version = "N/A"
-
-    try:
-        import scipy
-        scipy_version = scipy.__version__
-    except Exception:
-        scipy_version = "N/A"
-
-    try:
-        import pykrige
-        pk_version = pykrige.__version__
-    except Exception:
-        pk_version = "N/A"
-
-    try:
-        import matplotlib
-        mpl_version = matplotlib.__version__
-    except Exception:
-        mpl_version = "N/A"
-
-    import sys
-
-    meta_text = (
-        f"Report Generated:   {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
-        f"Plugin Version:     1.0.0\n"
-        f"Python Version:     {sys.version.split()[0]}\n"
-        f"NumPy Version:      {np_version}\n"
-        f"SciPy Version:      {scipy_version}\n"
-        f"PyKrige Version:    {pk_version}\n"
-        f"Matplotlib Version: {mpl_version}\n"
-        f"Platform:           {sys.platform}\n"
-        "\n"
-        "────────────────────────────────────────\n"
-        "This report was generated automatically by the GeoStats plugin.\n"
-        "All parameters and methods are recorded above for audit purposes.\n"
-        "A Qualified Person (QP) must validate these results before\n"
-        "inclusion in any public resource disclosure."
-    )
-
-    ax.text(0.1, 0.85, meta_text, fontsize=10, family="monospace",
-            va="top", transform=ax.transAxes)
-
-    fig.tight_layout()
-    pdf.savefig(fig)
-    plt.close(fig)
+    def generate_text_report(self, kriging_params, data_stats, report_path):
+        """
+        Legacy text report fallback.
+        """
+        try:
+            with open(report_path, "w", encoding="utf-8") as f:
+                f.write("      GEOSTATISTICS ANALYSIS - AUDIT TRAIL     \n")
+                f.write(f"Date of Analysis: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+                f.write(f"Points Used: {data_stats.get('total_points', 0)}\n")
+                f.write(f"Model: {kriging_params.get('model', 'N/A')}\n")
+            return report_path
+        except:
+            return None

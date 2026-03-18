@@ -8,6 +8,10 @@ Variogram modeling · Kriging interpolation · Cross-validation · Audit-trail r
 ![GPLv3 License](https://img.shields.io/badge/License-GPLv3-blue)
 ![PyQt6](https://img.shields.io/badge/Qt-6_(PyQt6)-41CD52?logo=qt&logoColor=white)
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.18803707.svg)](https://doi.org/10.5281/zenodo.18803707)
+<<<<<<< Updated upstream
+=======
+
+>>>>>>> Stashed changes
 ---
 
 ## 📋 Table of Contents
@@ -125,21 +129,20 @@ The plugin covers the full pipeline from exploratory data validation to kriging 
 | QGIS      | >= 3.28 (up to 4.x)  |
 | Python    | 3.12+                |
 | Qt        | 6.x (PyQt6)          |
+| NumPy     | Bundled              |
+| SciPy     | Bundled              |
+| Matplotlib| Bundled              |
 
 ### Python Dependencies
 
 Listed in [`requirements.txt`](requirements.txt):
 
 ```text
-numpy>=1.24
-scipy>=1.10
-pandas>=2.0
-matplotlib>=3.7
 scikit-gstat>=1.0
 pykrige>=1.7
 ```
 
-> **Note:** QGIS bundles NumPy, SciPy, and Matplotlib. You may need to install `scikit-gstat` and `pykrige` manually into the QGIS Python environment (see installation section).
+> **Note:** QGIS bundles NumPy, SciPy, and Matplotlib. You only need to install `scikit-gstat` and `pykrige` manually.
 
 ### System Libraries
 
@@ -247,7 +250,6 @@ geostats/
 │
 ├── build_plugin.py                 # Packaging script → geostats_plugin.zip
 ├── LICENSE                         # GPLv3 + geoscientific disclaimer
-├── RULES.md                        # Development governance & QP standards
 └── README.md                       # This file
 ```
 
@@ -320,9 +322,12 @@ This project is licensed under the **GNU General Public License v3.0** — see [
 ---
 
 ## Citation
+<<<<<<< Updated upstream
 
 > Sidney Schaberle Goveia, “Geostatistical Analysis for QGIS Processing Toolbox”. Zenodo, fev. 27, 2026. doi: 10.5281/zenodo.18803707
 
 ---
+=======
+>>>>>>> Stashed changes
 
-Made with ❤️ for the geoscience community
+> Sidney Schaberle Goveia, “Geostatistical Analysis for QGIS Processing Toolbox”. Zenodo, fev. 27, 2026. doi: 10.5281/zenodo.18803707

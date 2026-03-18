@@ -1,1 +1,1 @@
-# -*- coding: utf-8 -*-
+# Initialize UI module
