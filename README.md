@@ -8,6 +8,7 @@ Variogram modeling · Kriging interpolation · Cross-validation · Audit-trail r
 ![GPLv3 License](https://img.shields.io/badge/License-GPLv3-blue)
 ![PyQt6](https://img.shields.io/badge/Qt-6_(PyQt6)-41CD52?logo=qt&logoColor=white)
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.18803707.svg)](https://doi.org/10.5281/zenodo.18803706)
+[![LinkedIn](https://img.shields.io/badge/LinkedIn-Geosaber-blue?logo=linkedin)](https://www.linkedin.com/company/16206174)
 
 ---
 
